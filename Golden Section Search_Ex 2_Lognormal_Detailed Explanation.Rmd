@@ -1,0 +1,284 @@
+---
+title: "Golden Section Search Applied to a Lognormal-Type Objective"
+author: "Sulagna Roy"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    theme: flatly
+    df_print: paged
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Overview
+
+This document explains a second application of the **golden section search**
+method, this time minimizing a function built from the **lognormal
+distribution's density shape** rather than a simple polynomial. The
+algorithm itself is identical to the earlier golden-section example — the
+only change is the objective function `f` and the search interval passed to
+it. This document focuses the explanation on what makes this new objective
+different and how that changes the numerical behavior of the search.
+
+# The Objective Function
+
+```{r objective-function}
+# Objective function
+f <- function(x) {
+  -(1/x*sqrt(2*pi))*exp(-0.5*(log(x)*log(x)))
+}
+```
+
+## What this function computes
+
+The (standard) lognormal probability density function is
+
+$$
+\phi_{\text{LN}}(x) = \frac{1}{x\sqrt{2\pi}} \exp\!\left(-\frac{(\ln x)^2}{2}\right), \qquad x > 0,
+$$
+
+which is exactly the *positive* of the expression being computed here,
+before the leading minus sign. So `f(x)` in this script is
+
+$$
+f(x) = -\phi_{\text{LN}}(x),
+$$
+
+i.e. the **negative** of the standard lognormal density. This sign flip is
+a standard trick: golden section search (like the earlier examples) is
+written to find a **minimum**, but here the real goal is to find the
+$x$ that **maximizes** the lognormal density — its mode. Minimizing $-\phi_{\text{LN}}(x)$
+is mathematically equivalent to maximizing $\phi_{\text{LN}}(x)$, so no
+change to the search algorithm itself is needed.
+
+## Domain consideration
+
+Because of the $1/x$ term and $\ln x$, this function is only defined for
+$x > 0$; at $x = 0$ it is undefined (division by zero and $\ln 0$).
+This is why the search below is run starting from `a = 0.01` rather than
+`a = 0`, keeping the search safely inside the function's valid domain
+while still starting very close to zero.
+
+## Shape of the function
+
+Unlike the earlier quartic examples, which had two symmetric-looking dips,
+$-\phi_{\text{LN}}(x)$ has a **single** minimum. The lognormal density
+rises steeply from 0 near $x=0^+$, peaks at its mode, and then decays
+slowly toward 0 as $x \to \infty$ — so its negative has a single sharp dip
+at that same mode and flattens out toward 0 from below as $x$ grows. This
+means $f$ is unimodal on any interval containing that one dip, exactly the
+condition golden section search requires.
+
+The mode of a standard lognormal distribution (i.e. $\ln X \sim N(0,1)$)
+has the closed-form value $x^\* = e^{-\sigma^2} = e^{-1} \approx 0.367879$,
+which will serve as a useful check against the numerical answer below.
+
+# The Golden Section Search Function
+
+```{r golden-search-function}
+# Golden Section Search
+golden_search <- function(f, a, b, tol = 1e-4) {
+  
+  tau <- (sqrt(5) - 1) / 2 # 0.618... 
+  
+  history <- data.frame(
+    iter = 0,
+    a = a,
+    b = b
+  )
+  
+  x1 <- b - tau * (b - a)
+  x2 <- a + tau * (b - a)
+  
+  f1 <- f(x1)
+  f2 <- f(x2)
+  
+  iter <- 0
+  while ((b - a) > tol) {
+    iter <- iter + 1
+    
+    if (f1 > f2) {
+      
+      a <- x1
+      x1 <- x2
+      f1 <- f2
+      
+      x2 <- a + tau * (b - a)
+      f2 <- f(x2)
+      
+    } else {
+      
+      b <- x2
+      x2 <- x1
+      f2 <- f1
+      
+      x1 <- b - tau * (b - a)
+      f1 <- f(x1)
+    }
+    history <- rbind(
+      history,
+      data.frame(iter = iter, a = a, b = b)
+    )
+  }
+  
+  list(
+    xmin = (a + b) / 2,
+    interval = c(a, b),
+    history = history
+  )
+}
+```
+
+## Explanation, step by step
+
+This is the same golden section search routine used previously, so the
+logic is summarized here rather than re-derived from scratch:
+
+**1. Golden ratio conjugate.** `tau <- (sqrt(5) - 1) / 2` sets
+$\tau \approx 0.618$, the constant satisfying the self-similarity property
+$\tau^2 = 1-\tau$. This is what allows one interior evaluation point to be
+recycled at every iteration.
+
+**2. Initial bracketing.** Two interior points are placed inside $[a,b]$:
+
+$$
+x_1 = b - \tau(b-a), \qquad x_2 = a + \tau(b-a),
+$$
+
+and `f` — here, the negative lognormal density — is evaluated once at each
+to get `f1` and `f2`.
+
+**3. Iterative shrinking (`while` loop).** As long as the raw bracket width
+`b - a` exceeds `tol`:
+
+- **If `f1 > f2`:** the (negative-density) value at the left test point is
+  larger, so under unimodality the mode-minimizer cannot be left of `x1`;
+  the left endpoint advances, `a <- x1`, the old `x2` is recycled as the
+  new `x1`, and a single new `x2` is computed and evaluated.
+- **Otherwise:** the right endpoint contracts, `b <- x2`, the old `x1`
+  becomes the new `x2`, and a single new `x1` is computed and evaluated.
+
+Exactly one new call to `f` happens per iteration, and the updated bracket
+is appended to `history`.
+
+**4. Return value.** Once `b - a <= tol`, the loop stops and the function
+returns the midpoint `(a + b) / 2` as `xmin`, the tiny final `interval`,
+and the complete `history` of every bracket along the way.
+
+The only place this objective function's different shape matters
+numerically is in *how many* iterations are needed and *where* the
+interval starts, both of which are visible in the results below.
+
+# Running the Search
+
+```{r run-search}
+# Run Golden Section Search
+result <- golden_search(f, a = 0.01, b = 10, tol = 1e-4)
+
+print(result)
+```
+
+## Interpreting the result
+
+This time the search interval is $[a,b] = [0.01,\ 10]$ — much wider than
+the $[1,5]$ interval used for the polynomial examples, because the
+lognormal density's interesting behavior (its rise, peak, and long decay)
+spans a wider range and the domain restriction $x>0$ makes starting near 0
+natural.
+
+- `xmin` $\approx$ `r round(result$xmin, 7)`, extremely close to the exact
+  closed-form mode $e^{-1} \approx 0.367879$ derived above — confirming the
+  search correctly located the peak of the lognormal density (since it was
+  minimizing the *negative* density).
+- `interval` $\approx$ `r paste0("[", paste(round(result$interval, 7), collapse=", "), "]")`,
+  a final bracket narrower than the `tol = 1e-4` requirement.
+- `history` has `r nrow(result$history)` rows (iterations $0$ through
+  `r max(result$history$iter)`), noticeably **more iterations than the
+  earlier $[1,5]$ examples** (which needed 23). This is expected: golden
+  section search shrinks the *absolute* width of the bracket by a factor of
+  $\tau$ each step, and the starting width here is $10 - 0.01 = 9.99$,
+  nearly double the width of $5-1=4$ used previously — a wider starting
+  interval simply takes more $\tau$-multiplications to shrink down to the
+  same absolute tolerance.
+
+```{r show-history}
+h <- result$history
+h
+```
+
+Looking at the printed history, notice how for the first several
+iterations only the *left* endpoint `a` stays fixed at `0.01` while `b`
+repeatedly contracts — this reflects the steep rise of $\phi_{\text{LN}}$
+just to the right of 0 pulling the search rightward quickly, before the
+bracket narrows enough for both endpoints to start moving on alternating
+iterations.
+
+# Visualizing the Convergence
+
+```{r plot-convergence, fig.width=7, fig.height=5}
+u <- seq(0, 6, length = 500)
+plot(u, f(u), type = 'l',
+     main = "Golden Section Search on the Negative Lognormal Density",
+     xlab = "x", ylab = "f(x) = -lognormal density")
+
+for (i in 1:nrow(h)) {
+  abline(v = h[i, 2], col = 2)  # left endpoint a, in red
+  abline(v = h[i, 3], col = 3)  # right endpoint b, in green
+}
+```
+
+## Reading the plot
+
+**Note on the plotting range:** the curve is drawn over `u = seq(0, 6,
+length = 500)`, i.e. only $x \in [0,6]$, even though the search itself ran
+on the much wider bracket $[0.01, 10]$. This is a minor mismatch in the
+original script — the plot window happens to still comfortably contain the
+minimizer near $x \approx 0.368$ and the final, fully-converged bracket
+lines, but it does **not** show the early iterations' bracket endpoints
+that briefly sit outside $[0,6]$ (for example the very first `b = 10`).
+Those early vertical lines are simply not drawn because they fall outside
+the visible x-axis range; this does not affect the correctness of the
+numerical result, only what is visible in this particular plot.
+
+Within the visible window:
+
+- The black curve shows $f(x)=-\phi_{\text{LN}}(x)$ plunging from
+  near 0 at $x=0^+$ down to a sharp minimum around $x\approx 0.37$, then
+  rising smoothly back toward 0 as $x$ increases — the mirror image of the
+  lognormal density's familiar right-skewed hump.
+- **Red lines** mark left endpoints `a`, **green lines** mark right
+  endpoints `b`, drawn for every iteration in `history` whose value lies
+  inside $[0,6]$.
+- As with the earlier examples, the bundle of red and green lines
+  visibly tightens around the minimum near $x\approx0.37$, with the
+  final several iterations' lines essentially overlapping — visual
+  confirmation that the bracket has collapsed onto the mode of the
+  lognormal density.
+
+# Summary
+
+This example reuses the same golden section search engine as before,
+demonstrating that the method generalizes immediately to any unimodal
+objective, not just polynomials:
+
+1. The objective here is the *negative* of the standard lognormal density,
+   turning a maximization (find the density's mode) into the minimization
+   golden section search is built for.
+2. The function's domain restriction ($x>0$) is respected by starting the
+   search bracket at `a = 0.01` instead of 0.
+3. The wider starting interval ($[0.01, 10]$ vs. $[1,5]$ previously) means
+   more iterations are needed to reach the same absolute tolerance, since
+   each step shrinks the bracket by the same multiplicative factor $\tau$
+   but starts from a larger absolute width.
+4. The numerical result, `xmin` $\approx$ `r round(result$xmin, 6)`, matches
+   the known closed-form mode of the standard lognormal distribution,
+   $e^{-1}\approx 0.367879$, to within the requested tolerance — a useful
+   sanity check that the search implementation is correct.
