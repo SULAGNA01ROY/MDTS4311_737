@@ -1,0 +1,591 @@
+---
+title: 'Cauchy MLE using Simulated Annealing: Complete Code Explanation'
+author: "Sulagna Roy"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+  pdf_document:
+    toc: true
+    number_sections: true
+    keep_tex: false
+  word_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+set.seed(1)
+```
+
+---
+
+# Introduction
+
+This document provides a comprehensive explanation of R code that implements **Simulated Annealing** to find the Maximum Likelihood Estimate (MLE) of the location parameter μ for a Cauchy distribution.
+
+**Key Challenge:** The log-likelihood for Cauchy distribution is **multimodal (non-concave)**, making standard optimization methods fail. Simulated Annealing overcomes this by using temperature-dependent probabilistic moves.
+
+---
+
+# Part 1: Initialization and Data Generation
+
+## Code Explanation
+
+```{r data_generation}
+set.seed(1)           # Set seed for reproducibility
+mu.star <- 5          # True location parameter
+n <- 4                # Sample size
+X <- rt(n, df = 1) + mu.star
+```
+
+## Detailed Explanation
+
+- **`set.seed(1)`**: Ensures reproducible random number generation
+- **`mu.star <- 5`**: The true location parameter (what we're trying to estimate)
+- **`n <- 4`**: Sample size
+- **`rt(n, df = 1)`**: Generates n=4 samples from Student's t-distribution with 1 degree of freedom
+  - This is equivalent to the **Cauchy distribution**
+  - A heavy-tailed distribution with undefined mean and variance
+- **`X <- rt(n, df = 1) + mu.star`**: Shifts the Cauchy samples by adding μ*=5
+  - Result: X_i = Z_i + 5, where Z_i ~ Cauchy(0,1)
+  - Final data: X ~ Cauchy(μ=5)
+
+## Purpose
+
+This creates sample data from a known distribution so we can:
+1. Test whether the algorithm recovers the true parameter (μ*=5)
+2. Visualize the likelihood function
+3. Demonstrate algorithm convergence
+
+---
+
+# Part 2: Log-Likelihood Function
+
+## Code
+
+```{r log_likelihood_function}
+log.like <- function(mu, X, T = 1)
+{
+  n <- length(X)
+  rtn <- -n*log(pi) - sum( log(1 + (X - mu)^2) )
+  return(exp(rtn/T))
+}
+```
+
+## Mathematical Background
+
+The log-likelihood for Cauchy distribution is:
+
+$$\ell(\mu) = -n \ln(\pi) - \sum_{i=1}^{n} \ln(1 + (X_i - \mu)^2)$$
+
+## Code Explanation
+
+- **Input Parameters:**
+  - `mu`: Location parameter (what we're optimizing)
+  - `X`: Observed data
+  - `T`: Temperature (default = 1)
+
+- **`n <- length(X)`**: Gets sample size
+
+- **`rtn <- -n*log(pi) - sum(log(1 + (X - mu)^2))`**: 
+  - Calculates the log-likelihood
+  - `-n*log(pi)`: First term (constant across μ values)
+  - `sum(log(1 + (X - mu)^2))`: Sum of log terms
+
+- **`return(exp(rtn/T))`**: 
+  - Returns **transformed likelihood** = exp(ℓ(μ)/T)
+  - NOT the standard likelihood
+
+## Why exp(ℓ/T)?
+
+This is the key innovation for optimization:
+
+**Temperature Effect on Landscape:**
+
+- **High T (e.g., T=1):** 
+  - exp(ℓ/T) ≈ 1 + ℓ/T
+  - Function is smooth and nearly flat
+  - Differences between peaks are dampened
+  - Algorithm explores broadly (exploitation minimized)
+
+- **Low T (e.g., T=0.1):**
+  - exp(ℓ/T) amplifies peaks
+  - Sharp, pronounced peaks
+  - Differences between solutions are magnified
+  - Algorithm refines locally (exploration reduced)
+
+**This creates the exploration → exploitation transition!**
+
+---
+
+# Part 3: Likelihood Visualization
+
+## Code
+
+```{r likelihood_visualization}
+mu.x <- seq(-10, 40, length = 1e3)  # 1000 values from -10 to 40
+ll.est <- log(sapply(mu.x, log.like, X))  # Evaluate log-likelihood
+plot(mu.x, ll.est, type = 'l', 
+     ylab = "log-likelihood", 
+     xlab = expression(mu))
+```
+
+## Step-by-Step Explanation
+
+### Step 1: Create Parameter Grid
+```{r eval=FALSE}
+mu.x <- seq(-10, 40, length = 1e3)
+```
+
+- Creates 1000 equally-spaced values from -10 to 40
+- These represent candidate parameter values
+
+### Step 2: Evaluate Likelihood at Each Point
+```{r eval=FALSE}
+ll.est <- log(sapply(mu.x, log.like, X))
+```
+
+- **`sapply(mu.x, log.like, X)`**: 
+  - Apply function `log.like` to each value in `mu.x`
+  - Returns a vector of transformed likelihoods (with T=1)
+  
+- **`log(...)`**: 
+  - Takes natural logarithm
+  - Converts exp(ℓ/T) back to ℓ scale for visualization
+  - Makes it easier to see the shape
+
+### Step 3: Visualize
+
+```{r eval=FALSE}
+plot(mu.x, ll.est, type = 'l', ylab = "log-likelihood", xlab = expression(mu))
+```
+
+- Creates line plot of log-likelihood vs. μ
+- Shows the **multimodal structure**
+
+## Key Observation
+
+The log-likelihood has **multiple peaks** (local maxima), which is why:
+- **Gradient-based methods fail**: They get trapped in nearest local peak
+- **Simulated Annealing is needed**: To jump between peaks and find global maximum
+
+---
+
+# Part 4: Simulated Annealing Algorithm
+
+This is the core algorithm. We'll break it into parts.
+
+## Complete Algorithm
+
+```{r simulated_annealing_function}
+simAn <- function(N = 10, r = .5){
+  # ========== INITIALIZATION ==========
+  x <- numeric(length = N)                    # Store parameter trajectory
+  x[1] <- runif(1, min = -10, max = 40)     # Random starting point
+  fn.value <- numeric(length = N)            # Store likelihood values
+  
+  fn.value[1] <- log.like(mu = x[1], X, T = 1)
+  
+  # ========== MAIN LOOP ==========
+  for(k in 2:N){
+    
+    # STEP 1: Generate Candidate (Random Walk)
+    a <- runif(1, x[k-1] - r, x[k-1] + r)
+    
+    # STEP 2: Temperature Schedule (Cooling)
+    T <- 1/(1 + log(log(k)))
+    
+    # STEP 3: Acceptance Ratio (Metropolis)
+    ratio <- log.like(mu = a, X, T)/log.like(mu = x[k-1], X, T)
+    
+    # STEP 4: Accept or Reject (Metropolis Criterion)
+    if( runif(1) < ratio){
+      x[k] <- a
+    } else{
+      x[k] <- x[k-1]
+    }
+    
+    # Store function value at T=1 (for comparison)
+    fn.value[k] <- log.like(mu = x[k], X, T = 1)
+  }
+  
+  # Return both trajectory and function values
+  return(list("x" = x, "fn.value" = fn.value)) 
+}
+```
+
+## Detailed Explanation
+
+### Initialization Phase
+
+```{r eval=FALSE}
+x <- numeric(length = N)
+x[1] <- runif(1, min = -10, max = 40)
+fn.value <- numeric(length = N)
+fn.value[1] <- log.like(mu = x[1], X, T = 1)
+```
+
+- **`x <- numeric(length = N)`**: 
+  - Vector to store all N parameter values (the algorithm's trajectory)
+  
+- **`x[1] <- runif(1, min = -10, max = 40)`**: 
+  - Initialize with random value in [-10, 40]
+  - Ensures we don't start at a known optimum
+  - Allows multiple runs to explore different regions
+  
+- **`fn.value`**: 
+  - Stores likelihood values
+  - Always evaluated at T=1 for comparability
+
+---
+
+### Main Loop: Step 1 - Candidate Generation
+
+```{r eval=FALSE}
+a <- runif(1, x[k-1] - r, x[k-1] + r)
+```
+
+**What it does:**
+- Generates a candidate solution `a`
+- From uniform distribution centered at current position x_{k-1}
+- Range: [x_{k-1} - r, x_{k-1} + r]
+
+**Parameters:**
+- **r = 0.5** (default): Step size/neighborhood radius
+  - r=0.5 means candidate is within ±0.5 of current position
+  - Larger r: Bigger jumps, more exploration, fewer acceptances
+  - Smaller r: Smaller jumps, slower exploration, more acceptances
+
+**Purpose:** Implement random walk to explore parameter space locally
+
+---
+
+### Main Loop: Step 2 - Temperature Schedule
+
+```{r eval=FALSE}
+T <- 1/(1 + log(log(k)))
+```
+
+**Temperature Calculation:**
+- Formula: $T_k = \frac{1}{1 + \ln(\ln(k))}$
+- Decreases monotonically as k increases (cooling schedule)
+
+**Temperature Evolution:**
+
+```{r temperature_schedule}
+k_values <- c(2, 5, 10, 50, 100, 500, 1000)
+T_values <- 1/(1 + log(log(k_values)))
+schedule_df <- data.frame(Iteration = k_values, Temperature = round(T_values, 4))
+print(schedule_df)
+```
+
+**Key Properties:**
+- **Early iterations** (small k): ln(ln(k)) is small → T is large
+  - High temperature = smooth landscape
+  - Algorithm accepts bad moves frequently
+  - **Broad exploration of parameter space**
+
+- **Late iterations** (large k): ln(ln(k)) is large → T is small
+  - Low temperature = sharp peaks
+  - Algorithm rejects bad moves frequently
+  - **Local refinement around best solution**
+
+- **Asymptotic behavior:** As k → ∞, T → 0
+  - Algorithm converges (stops accepting bad moves)
+
+**Why this schedule?**
+- Sub-geometric cooling (slower than exponential)
+- Theoretical guarantee: Convergence to global optimum as N → ∞
+- Faster than geometric but slower than linear cooling
+
+---
+
+### Main Loop: Step 3 - Acceptance Ratio
+
+```{r eval=FALSE}
+ratio <- log.like(mu = a, X, T)/log.like(mu = x[k-1], X, T)
+```
+
+**What it does:**
+$$\alpha = \frac{\ell(a)}{\ell(x_{k-1})} = \exp\left(\frac{\ell(a) - \ell(x_{k-1})}{T}\right)$$
+
+**Interpretation:**
+- **If ℓ(a) > ℓ(x_{k-1})**: 
+  - Candidate is better (higher likelihood)
+  - α > 1
+  - Will be accepted (unless u > 1, impossible)
+  
+- **If ℓ(a) < ℓ(x_{k-1})**: 
+  - Candidate is worse (lower likelihood)
+  - α < 1
+  - Accepted with probability α
+
+**Temperature Effect:**
+
+Suppose ℓ(a) - ℓ(x_{k-1}) = -1 (worse by 1 unit):
+
+- High T (T=0.5): α = exp(-1/0.5) = exp(-2) ≈ 0.135 → Accept with 13.5% probability
+- Low T (T=0.1): α = exp(-1/0.1) = exp(-10) ≈ 0.00005 → Accept with 0.005% probability
+
+**Interpretation:** High temperature is more **forgiving** of bad moves (exploration), while low temperature is more **selective** (exploitation).
+
+---
+
+### Main Loop: Step 4 - Metropolis Criterion (Accept/Reject)
+
+```{r eval=FALSE}
+if( runif(1) < ratio){
+  x[k] <- a
+} else{
+  x[k] <- x[k-1]
+}
+```
+
+**Algorithm:**
+1. Generate u ~ Uniform(0,1)
+2. **If u < α**: Accept candidate (x_k ← a)
+3. **Else**: Reject candidate, keep current (x_k ← x_{k-1})
+
+**Probabilistic Acceptance:**
+- Since u is uniform on [0,1], P(u < α) = α
+- Better solutions (α > 1): Always accepted
+- Worse solutions (α ≤ 1): Accepted with probability α
+
+**Why This Works:**
+
+The key insight is that **accepting some bad moves allows escape from local maxima**:
+
+```
+START at local maximum → Temperature is high → Accept bad move anyway
+       ↓
+Move to different region → Climb different peak
+       ↓
+Temperature decreases → Stop accepting bad moves
+       ↓
+Converge to global maximum (if lucky) or local maximum (if unlucky)
+```
+
+---
+
+### Store Function Value
+
+```{r eval=FALSE}
+fn.value[k] <- log.like(mu = x[k], X, T = 1)
+```
+
+- Always evaluates at **T=1** (not temperature-adjusted)
+- This is the true likelihood (not the transformed version)
+- Allows fair comparison across all iterations
+- Used later for finding the best solution
+
+---
+
+### Return Statement
+
+```{r eval=FALSE}
+return(list("x" = x, "fn.value" = fn.value))
+```
+
+Returns a list with:
+- **x**: All parameter values sampled (the trajectory)
+- **fn.value**: Corresponding likelihood values
+
+---
+
+# Part 5: Testing the Algorithm
+
+## Run Single Algorithm
+
+```{r single_run}
+# Run simulated annealing for 100 iterations with r=5
+sim <- simAn(N = 1e2, r = 5)
+
+# Find the parameter value with highest likelihood
+mu_hat <- sim$x[which.max(sim$fn.value)]
+cat("Estimated MLE: mu_hat =", round(mu_hat, 4), "\n")
+cat("True parameter: mu* =", mu.star, "\n")
+```
+
+## Multiple Independent Runs
+
+```{r multiple_runs, fig.width=12, fig.height=10}
+# Create grid for plotting likelihood
+mu.x <- seq(-10, 40, length = 1e3)
+ll.est <- log(sapply(mu.x, log.like, X))
+
+# Run algorithm 4 times independently
+par(mfrow = c(2,2))
+
+colors <- c("blue", "darkred", "darkgreen", "purple")
+mles <- numeric(4)
+
+for(i in 1:4){
+  sim <- simAn(N = 1e2, r = 5)
+  mles[i] <- sim$x[which.max(sim$fn.value)]
+  
+  plot(mu.x, ll.est, type = 'l', 
+       ylab = "log-likelihood", 
+       xlab = expression(mu),
+       main = paste("Run", i))
+  
+  points(sim$x, log(sim$fn.value), 
+         pch = 16, 
+         col = adjustcolor(colors[i], alpha = .4))
+}
+
+par(mfrow = c(1,1))
+
+cat("\nMLE estimates from 4 independent runs:\n")
+print(round(mles, 4))
+cat("Mean of estimates:", round(mean(mles), 4), "\n")
+cat("SD of estimates:", round(sd(mles), 4), "\n")
+```
+
+## What This Shows
+
+- **Black curve**: True log-likelihood ℓ(μ)
+- **Colored dots**: Sampled parameter values during algorithm execution
+- **All 4 plots**: Same likelihood curve but different random trajectories
+- **Key observation**: All runs converge to same peak despite different starting points
+
+This demonstrates **global optimization** (not trapped in local maxima).
+
+---
+
+# Part 6: Effect of Step Size r
+
+## Large Step Size: r = 500
+
+```{r large_r, fig.width=12, fig.height=5}
+par(mfrow = c(1,2))
+
+# Large r = 500
+sim <- simAn(N = 1e3, r = 500)
+plot(mu.x, ll.est, type = 'l', 
+     main = "r = 500. Many rejections",
+     ylab = "log-likelihood", 
+     xlab = expression(mu))
+points(sim$x, log(sim$fn.value), 
+       pch = 16, 
+       col = adjustcolor("blue", alpha = .2))
+cat("\nLarge r = 500:\n")
+cat("Number of accepted moves:", sum(diff(sim$x) != 0), "out of 999\n")
+cat("Acceptance rate:", round(100*sum(diff(sim$x) != 0)/999, 1), "%\n")
+```
+
+**Explanation:**
+- **r = 500**: Candidates are ±500 from current position
+- **Problem**: Parameter space is only [-10, 40], so proposals often land far outside data likelihood mass
+- **Result**: High rejection rate (wasted iterations)
+- **Trajectory**: Sparse (few accepted moves, many repeated values)
+- **Efficiency**: Poor
+
+---
+
+## Small Step Size: r = 0.1
+
+```{r small_r, fig.width=12, fig.height=5}
+# Small r = 0.1
+sim <- simAn(N = 1e3, r = 0.1)
+plot(mu.x, ll.est, type = 'l', 
+     main = "r = 0.1. Many small acceptances",
+     ylab = "log-likelihood", 
+     xlab = expression(mu))
+points(sim$x, log(sim$fn.value), 
+       pch = 16, 
+       col = adjustcolor("blue", alpha = .2))
+cat("\nSmall r = 0.1:\n")
+cat("Number of accepted moves:", sum(diff(sim$x) != 0), "out of 999\n")
+cat("Acceptance rate:", round(100*sum(diff(sim$x) != 0)/999, 1), "%\n")
+
+par(mfrow = c(1,1))
+```
+
+**Explanation:**
+- **r = 0.1**: Candidates are ±0.1 from current position
+- **Advantage**: Nearly all proposals are accepted (high acceptance rate)
+- **Disadvantage**: Algorithm moves very slowly through parameter space
+- **Risk**: May not explore broadly enough to find global maximum
+- **Trajectory**: Dense (many different sampled values)
+
+---
+
+## Optimal Step Size
+
+**General principle:** 
+$$r_{opt} \approx \frac{\text{Parameter Range}}{10}$$
+
+In this case:
+- Parameter range: [-10, 40] → width = 50
+- Optimal r ≈ 5
+- This is why r=5 was used in earlier examples
+
+---
+
+# Summary: Key Concepts
+
+## 1. Temperature Schedule: $T_k = \frac{1}{1 + \ln(\ln(k))}$
+
+- **Decreases over iterations**: Controls landscape shape
+- **Early iterations** (high T): Smooth landscape → Broad exploration
+- **Late iterations** (low T): Sharp peaks → Local refinement
+- **Purpose**: Escape from local maxima early, then converge
+
+## 2. Metropolis Criterion: $\alpha = e^{(\ell(a) - \ell(x_{k-1}))/T}$
+
+- **Always accept** if α > 1 (uphill moves)
+- **Probabilistically accept** if α ≤ 1 (downhill moves with probability α)
+- **Temperature modulates tolerance**: High T accepts more bad moves
+- **Key insight**: Occasional bad moves enable global optimization
+
+## 3. Step Size r
+
+- **Too large**: Rejections dominate, inefficient
+- **Too small**: Slow exploration, may miss global maximum
+- **Optimal**: r ≈ parameter range / 10
+- **Trade-off**: Balance between exploration breadth and acceptance rate
+
+## 4. Convergence Properties
+
+- **Global optimization**: Finds true maximum, not local optimum
+- **Robust**: Works from any starting point
+- **Multimodal**: Handles non-concave likelihood functions
+- **Theoretical guarantee**: With sub-geometric cooling, converges to global optimum as N → ∞
+
+## 5. Why Simulated Annealing Works for Cauchy
+
+- **Problem**: Cauchy likelihood is multimodal (non-concave)
+- **Gradient methods fail**: Climb nearest peak, get stuck
+- **Simulated Annealing succeeds**: Probabilistically jumps between peaks
+- **Cost**: Slower than local methods, but more robust
+
+---
+
+# Conclusion
+
+Simulated Annealing is a powerful algorithm for **global optimization** that:
+
+1. **Mimics physics**: Models cooling of metals (annealing)
+2. **Uses temperature**: Controls exploration vs. exploitation
+3. **Employs randomness**: Escapes local optima probabilistically
+4. **Guarantees convergence**: Under mild conditions, finds global optimum
+5. **Applies broadly**: Works for any multimodal optimization problem
+
+The algorithm is particularly valuable for:
+- Maximum likelihood estimation in complex models
+- Parameter inference with non-concave likelihood
+- Any discrete or continuous optimization problem
+- Problems where gradients are unavailable or unreliable
+
+---
+
+# References
+
+- Metropolis, N., Rosenbluth, A. W., Rosenbluth, M. N., Teller, A. H., & Teller, E. (1953). Equation of state calculations by fast computing machines. Journal of Chemical Physics.
+
+- Kirkpatrick, S., Gelatt, C. D., & Vecchi, M. P. (1983). Optimization by simulated annealing. Science, 220(4598), 671-680.
+
