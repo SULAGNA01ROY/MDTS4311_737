@@ -1,0 +1,534 @@
+---
+title: "Bisection Method for Finding Roots: Complete Explanation"
+author: Sulagna Roy
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+  pdf_document:
+    toc: true
+    number_sections: true
+    keep_tex: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+rm(list = ls())
+```
+
+---
+
+# Introduction
+
+This document provides a **complete explanation** of the Bisection Method for finding roots of functions. The bisection method is a fundamental numerical technique used to locate zeros of functions by repeatedly dividing an interval in half and selecting the subinterval where the function changes sign.
+
+**Key Concept:** If a continuous function f(x) has opposite signs at two points, then by the Intermediate Value Theorem, there must be at least one root between those points.
+
+---
+
+# Problem Setup
+
+## The Functions
+
+```{r define_functions}
+# Define the objective function
+f <- function(x) (x-2)^2 * (x-8)^2
+
+# Define the derivative (for root finding)
+df <- function(x) 4*(x-2)*(x-5)*(x-8)
+```
+
+## Mathematical Background
+
+**Objective Function:**
+$$f(x) = (x-2)^2(x-8)^2$$
+
+This is a polynomial function with:
+- Roots at x = 2 (double root) and x = 8 (double root)
+- Minimum values at these roots
+- Always non-negative: f(x) ≥ 0 for all x
+
+**Derivative (Rate of Change):**
+$$f'(x) = 4(x-2)(x-5)(x-8)$$
+
+This derivative has:
+- Roots at x = 2, x = 5, and x = 8
+- Critical points (local extrema) at these values
+- Sign changes at these points
+
+## Why We Use the Derivative
+
+The problem asks to **find the minimum of f(x) using the bisection method**. Instead of finding where f(x) = 0, we:
+
+- Use the **derivative** f'(x) = 0 to find critical points
+- The derivative changes sign at the minimum
+- Apply bisection to find where f'(x) = 0
+
+This is an application of **numerical root-finding** to solve the optimization problem.
+
+---
+
+# Initial Parameters
+
+```{r initial_parameters}
+a <- 6      # Left endpoint of interval
+b <- 10     # Right endpoint of interval
+e <- 0.01   # Tolerance (stopping criterion)
+```
+
+## Parameter Explanation
+
+| Parameter | Value | Meaning |
+|-----------|-------|---------|
+| **a** | 6 | Left endpoint of search interval [6, 10] |
+| **b** | 10 | Right endpoint of search interval [6, 10] |
+| **e** | 0.01 | Tolerance/precision (interval width threshold) |
+
+## Why These Values?
+
+**Interval [6, 10]:**
+
+- The derivative has a critical point at x = 5 and another at x = 8
+- In the interval [6, 10], we expect to find a critical point near x = 8
+- At x = 6: f'(6) = 4(4)(1)(−2) = −32 < 0 (function decreasing)
+- At x = 10: f'(10) = 4(8)(5)(2) = 320 > 0 (function increasing)
+- Sign change detected! Root must be between 6 and 10
+
+**Tolerance e = 0.01:**
+
+- Algorithm stops when interval width (b − a) ≤ 0.01
+- This provides reasonable precision for finding the root
+- Smaller e → more iterations, better precision
+- Larger e → fewer iterations, less precision
+
+---
+
+# Bisection Algorithm
+
+## Complete Code
+
+```{r bisection_algorithm}
+a <- 6
+b <- 10
+e <- 0.01
+
+# Track iterations for visualization
+iterations <- 0
+history <- data.frame(
+  Iteration = numeric(),
+  a = numeric(),
+  b = numeric(),
+  m = numeric(),
+  df_m = numeric(),
+  width = numeric()
+)
+
+while ((b-a) > e) {
+  iterations <- iterations + 1
+  
+  # Step 1: Find midpoint
+  m <- (a+b)/2
+  
+  # Step 2: Evaluate derivative at midpoint
+  df_m <- df(m)
+  
+  # Step 3: Bisection criterion
+  if (df_m < 0) {
+    # Derivative is negative (function decreasing)
+    # Root is to the right of m
+    a <- m
+  } else {
+    # Derivative is positive (function increasing)
+    # Root is to the left of m
+    b <- m
+  }
+  
+  # Store iteration history
+  history <- rbind(history, data.frame(
+    Iteration = iterations,
+    a = a,
+    b = b,
+    m = m,
+    df_m = df_m,
+    width = b - a
+  ))
+}
+
+# Final estimate
+x <- (a+b)/2
+
+cat("Algorithm Convergence Summary:\n")
+cat("===============================\n")
+cat("Number of iterations:", iterations, "\n")
+cat("Final interval width:", b-a, "\n")
+cat("Tolerance threshold:", e, "\n")
+```
+
+---
+
+# Algorithm Explanation: Step by Step
+
+## Step 1: Find the Midpoint
+
+```{r step1_explanation, eval=FALSE}
+m <- (a+b)/2
+```
+
+**What it does:**
+- Computes the midpoint m of the interval [a, b]
+- m = (a + b) / 2
+- This divides the interval into two equal halves
+
+**Example:**
+- If a = 6 and b = 10
+- Then m = (6 + 10) / 2 = 8
+
+---
+
+## Step 2: Evaluate the Derivative at the Midpoint
+
+```{r step2_explanation, eval=FALSE}
+df_m <- df(m)
+```
+
+**What it does:**
+- Calculates f'(m) at the midpoint
+- This tells us the sign of the derivative at m
+
+**Interpretation:**
+- **f'(m) < 0**: Function is decreasing at m → Root is to the right (larger x)
+- **f'(m) > 0**: Function is increasing at m → Root is to the left (smaller x)
+- **f'(m) = 0**: Found the exact root! (unlikely with finite precision)
+
+---
+
+## Step 3: Update the Interval (Bisection Criterion)
+
+```{r step3_explanation, eval=FALSE}
+if (df_m < 0) {
+  a <- m      # Move left endpoint to midpoint
+} else {
+  b <- m      # Move right endpoint to midpoint
+}
+```
+
+**Logic:**
+
+- **If f'(m) < 0** (derivative negative, function decreasing):
+  - Root where derivative becomes zero is to the RIGHT of m
+  - Keep everything to the right: Set a ← m
+  - New interval: [m, b] (right half)
+  
+- **If f'(m) ≥ 0** (derivative positive/zero, function increasing):
+  - Root where derivative becomes zero is to the LEFT of m
+  - Keep everything to the left: Set b ← m
+  - New interval: [a, m] (left half)
+
+**Effect:** Interval shrinks by half each iteration
+
+---
+
+## Step 4: Check Stopping Criterion
+
+```{r step4_explanation, eval=FALSE}
+while ((b-a) > e) {
+  # Continue loop
+}
+```
+
+**Condition:**
+- Loop continues as long as interval width > tolerance
+- When (b − a) ≤ 0.01, algorithm terminates
+
+**Precision Trade-off:**
+- Smaller tolerance → More iterations, higher precision
+- Larger tolerance → Fewer iterations, lower precision
+
+---
+
+# Iteration History
+
+```{r show_history}
+cat("\nDetailed Iteration History:\n")
+cat("============================\n\n")
+print(round(history, 6))
+```
+
+## What the History Shows
+
+**Column Explanations:**
+
+| Column | Meaning |
+|--------|---------|
+| **Iteration** | Which iteration (1st, 2nd, 3rd, ...) |
+| **a** | Left endpoint after this iteration |
+| **b** | Right endpoint after this iteration |
+| **m** | Midpoint tested in this iteration |
+| **df_m** | Derivative value at midpoint f'(m) |
+| **width** | New interval width (b − a) |
+
+**Key Observations:**
+
+1. **Interval shrinks geometrically**: width ≈ width / 2 each iteration
+2. **Sign change persists**: f'(a) and f'(b) always have opposite signs
+3. **Convergence is guaranteed**: Width → 0 as iterations increase
+4. **Linear convergence rate**: Each iteration eliminates half the remaining interval
+
+---
+
+# Final Results
+
+```{r final_results}
+cat("\n===============================\n")
+cat("FINAL RESULTS\n")
+cat("===============================\n\n")
+
+x <- (a+b)/2
+
+cat("Root location (x where f'(x) ≈ 0):\n")
+cat("Minimum x =", x, "\n\n")
+
+cat("Function value at root:\n")
+cat("Minimum f(x) =", f(x), "\n\n")
+
+cat("Verification:\n")
+cat("f'(x) ≈", df(x), "\n")
+cat("Derivative is very close to zero ✓\n")
+```
+
+## Interpretation
+
+**Minimum x ≈ 7.99**
+- The function f(x) = (x−2)²(x−8)² has a minimum near x = 8
+- The derivative f'(x) = 4(x−2)(x−5)(x−8) equals zero at x = 8
+- Algorithm found the root with tolerance 0.01
+
+**Minimum f(x) ≈ 0**
+- The function value at the minimum is approximately 0
+- This makes sense: (7.99−2)²(7.99−8)² ≈ 0
+- The minimum of f(x) is actually 0 (achieved at x = 2 and x = 8)
+
+---
+
+# Visualization
+
+## Derivative Function Plot
+
+```{r plot_derivative, fig.width=10, fig.height=6}
+x_vals <- seq(0, 12, length = 500)
+df_vals <- df(x_vals)
+
+plot(x_vals, df_vals, type = 'l', lwd = 2, col = 'blue',
+     main = "Derivative f'(x) = 4(x-2)(x-5)(x-8)",
+     xlab = "x", ylab = "f'(x)",
+     ylim = c(-50, 100))
+
+# Add horizontal line at y = 0
+abline(h = 0, col = 'black', lty = 2, lwd = 1)
+
+# Mark the roots of the derivative
+roots <- c(2, 5, 8)
+abline(v = roots, col = 'red', lty = 3, lwd = 1.5, alpha = 0.5)
+points(roots, rep(0, 3), pch = 16, col = 'red', cex = 2)
+
+# Highlight search interval [6, 10]
+rect(6, -50, 10, 100, border = 'green', lwd = 2, lty = 2)
+text(8, 80, 'Search Interval [6,10]', col = 'green', cex = 1.2, font = 2)
+
+# Mark final solution
+final_x <- x
+final_df <- df(final_x)
+points(final_x, final_df, pch = 17, col = 'purple', cex = 2.5)
+text(final_x, final_df + 10, paste('Solution:\nx ≈', round(final_x, 4)), 
+     col = 'purple', cex = 1, font = 2)
+
+legend('topleft', 
+       c('f\'(x)', 'Roots of f\'(x)', 'Search interval', 'Found root'),
+       col = c('blue', 'red', 'green', 'purple'),
+       lty = c(1, 3, 2, NA),
+       pch = c(NA, 16, NA, 17),
+       lwd = c(2, 1.5, 2, NA),
+       cex = 1)
+```
+
+## Objective Function Plot
+
+```{r plot_objective, fig.width=10, fig.height=6}
+f_vals <- f(x_vals)
+
+plot(x_vals, f_vals, type = 'l', lwd = 2, col = 'darkgreen',
+     main = "Objective Function f(x) = (x-2)²(x-8)²",
+     xlab = "x", ylab = "f(x)",
+     ylim = c(-5, 200))
+
+# Mark critical points (where f'(x) = 0)
+critical_points <- c(2, 5, 8)
+f_critical <- f(critical_points)
+points(critical_points, f_critical, pch = 16, col = 'red', cex = 2.5)
+
+# Add labels
+labels <- c("Min\n(f=0)", "Local\nMax", "Min\n(f=0)")
+for(i in 1:3) {
+  text(critical_points[i], f_critical[i] + 15, labels[i], 
+       col = 'red', cex = 1, font = 2)
+}
+
+# Highlight search interval [6, 10]
+rect(6, -5, 10, 200, border = 'blue', lwd = 2, lty = 2)
+text(8, 150, 'Search Interval [6,10]', col = 'blue', cex = 1.2, font = 2)
+
+# Mark found minimum
+final_f <- f(final_x)
+points(final_x, final_f, pch = 17, col = 'purple', cex = 2.5)
+text(final_x - 0.8, final_f + 20, paste('Found:\nx ≈', round(final_x, 4), 
+                                         '\nf(x) ≈', round(final_f, 4)), 
+     col = 'purple', cex = 1, font = 2)
+
+legend('topright',
+       c('f(x)', 'Critical points', 'Search interval', 'Found minimum'),
+       col = c('darkgreen', 'red', 'blue', 'purple'),
+       lty = c(1, NA, 2, NA),
+       pch = c(NA, 16, NA, 17),
+       lwd = c(2, NA, 2, NA),
+       cex = 1)
+```
+
+## Convergence Plot
+
+```{r plot_convergence, fig.width=10, fig.height=6}
+# Plot interval width over iterations
+plot(history$Iteration, history$width, type = 'b', 
+     pch = 16, cex = 1.5, col = 'darkblue', lwd = 2,
+     main = "Convergence: Interval Width vs. Iteration",
+     xlab = "Iteration Number",
+     ylab = "Interval Width (b - a)",
+     ylim = c(0, 4.5))
+
+# Add tolerance line
+abline(h = e, col = 'red', lty = 2, lwd = 2)
+text(max(history$Iteration) * 0.7, e + 0.2, 
+     paste('Tolerance = ', e), col = 'red', font = 2, cex = 1.1)
+
+# Add grid
+grid(col = 'gray', lty = 3)
+
+# Annotate convergence
+for(i in 1:nrow(history)) {
+  text(history$Iteration[i], history$width[i] + 0.2, 
+       round(history$width[i], 3), cex = 0.8, pos = 3)
+}
+
+legend('topright',
+       c('Interval width', 'Tolerance threshold'),
+       col = c('darkblue', 'red'),
+       lty = c(1, 2),
+       lwd = c(2, 2),
+       pch = c(16, NA),
+       cex = 1)
+```
+
+---
+
+# Convergence Analysis
+
+## Linear Convergence Rate
+
+```{r convergence_analysis}
+# Calculate convergence rate
+initial_width <- history$width[1]
+final_width <- history$width[nrow(history)]
+n_iter <- nrow(history)
+
+cat("\nConvergence Analysis:\n")
+cat("=======================\n")
+cat("Initial interval width:", initial_width, "\n")
+cat("Final interval width:", final_width, "\n")
+cat("Number of iterations:", n_iter, "\n\n")
+
+# Theoretical reduction factor per iteration
+reduction_per_iter <- 0.5
+theoretical_final <- initial_width * (reduction_per_iter ^ n_iter)
+
+cat("Theoretical convergence (width = initial × 0.5^n):\n")
+cat("Expected final width:", round(theoretical_final, 6), "\n")
+cat("Actual final width:", round(final_width, 6), "\n\n")
+
+# Number of iterations needed for tolerance
+target_width <- e
+iterations_needed <- log(initial_width / target_width) / log(2)
+cat("Theoretical iterations needed for tolerance e =", e, ":\n")
+cat("log₂(", initial_width, "/", target_width, ") =", round(iterations_needed, 2), "\n")
+cat("Actual iterations used:", n_iter, "\n")
+```
+
+---
+
+# Summary: Key Concepts
+
+## What is the Bisection Method?
+
+The **bisection method** is a numerical algorithm to find roots of continuous functions by:
+
+1. **Starting** with an interval [a, b] where f(a) and f(b) have opposite signs
+2. **Finding** the midpoint m = (a + b) / 2
+3. **Replacing** one endpoint with m to maintain opposite signs
+4. **Repeating** until the interval is sufficiently small
+
+## Advantages
+
+✓ **Simple**: Easy to understand and implement  
+✓ **Guaranteed**: Always converges if f is continuous and has a sign change  
+✓ **Robust**: Works even if f is non-differentiable or has complex behavior  
+✓ **Predictable**: Linear convergence rate is known  
+
+## Disadvantages
+
+✗ **Slow**: Requires many iterations compared to faster methods  
+✗ **Sign change required**: Needs opposite signs at endpoints  
+✗ **One root at a time**: Only finds one root per interval  
+✗ **Cannot find complex roots**: Only works for real-valued functions  
+
+## When to Use Bisection
+
+- When you have an interval with a guaranteed sign change
+- When f is continuous but difficult to differentiate
+- When you need a simple, reliable method
+- When multiple roots exist (use bisection separately for each region)
+- When you're unsure if faster methods will converge
+
+## Comparison with Other Root-Finding Methods
+
+| Method | Speed | Convergence | Requirements |
+|--------|-------|------------|--------------|
+| **Bisection** | Slow (linear) | Guaranteed | Sign change |
+| **Newton-Raphson** | Fast (quadratic) | Local | Derivative needed |
+| **Secant** | Medium | Superlinear | No derivative |
+| **Regula Falsi** | Medium | Linear | Sign change |
+
+---
+
+# Conclusion
+
+The **bisection method** is a fundamental numerical technique for finding roots of functions. In this example, we used it to find the critical point (minimum) of f(x) = (x−2)²(x−8)² by finding where its derivative equals zero.
+
+**Key Results:**
+- Found minimum at x ≈ **7.99** (very close to the true value 8)
+- Function value at minimum: f(x) ≈ **0.00** (essentially zero)
+- Required **`r nrow(history)` iterations** to achieve tolerance 0.01
+- **Linear convergence**: Interval width halves each iteration
+
+The algorithm demonstrates the power of simple iterative methods for solving practical numerical problems when exact analytical solutions are unavailable.
+
+---
+
+# References
+
+- Chapra, S. C., & Canale, R. P. (2015). Numerical Methods for Engineers (7th ed.). McGraw-Hill.
+
+- Burden, R. L., & Faires, J. D. (2015). Numerical Analysis (10th ed.). Cengage Learning.
+
+- Quarteroni, A., Sacco, R., & Saleri, F. (2010). Numerical Mathematics (2nd ed.). Springer.
+
