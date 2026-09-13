@@ -1,0 +1,590 @@
+---
+title: "Newton-Raphson Method for Gamma Distribution MLE: Complete Explanation"
+author: Sulagna Roy
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+  pdf_document:
+    toc: true
+    number_sections: true
+    keep_tex: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+rm(list = ls())
+```
+
+---
+
+# Introduction
+
+This document provides a **comprehensive explanation** of the Newton-Raphson method for finding the Maximum Likelihood Estimate (MLE) of the shape parameter α in a **Gamma distribution**. 
+
+The Newton-Raphson method is a powerful, fast-converging numerical optimization algorithm that uses both the first derivative (score/gradient) and second derivative (Hessian/curvature) to iteratively approach the maximum of the likelihood function.
+
+**Key Advantage over Bisection:** Quadratic convergence (instead of linear) — dramatically faster!
+
+---
+
+# Part 1: Problem Setup and Data Generation
+
+## Gamma Distribution Background
+
+```{r data_generation, fig.width=10, fig.height=6}
+# Set seed for reproducibility
+set.seed(123)
+
+# Generate sample from Gamma(shape=5, scale=1)
+x <- rgamma(5000, shape = 5, scale = 1)
+n <- length(x)
+
+cat("Data Summary:\n")
+cat("=============\n")
+cat("Sample size: n =", n, "\n")
+cat("Sample mean: x_bar =", round(mean(x), 4), "\n")
+cat("Sample variance: s^2 =", round(var(x), 4), "\n")
+cat("Sample standard deviation: s =", round(sd(x), 4), "\n\n")
+
+# Plot histogram with theoretical density
+hist(x, breaks = 50, probability = TRUE, 
+     main = "Histogram of Gamma(α=5, β=1) Data",
+     xlab = "x", ylab = "Density",
+     col = "lightblue", border = "black")
+
+# Add theoretical density
+x_seq <- seq(0, max(x), length = 500)
+lines(x_seq, dgamma(x_seq, shape = 5, scale = 1), 
+      col = "red", lwd = 2, lty = 2)
+
+legend("topright",
+       c("Empirical", "Theoretical Gamma(5,1)"),
+       col = c("lightblue", "red"),
+       lwd = c(5, 2),
+       lty = c(1, 2))
+```
+
+## Mathematical Background
+
+**Gamma Distribution PDF:**
+$$f(x | \alpha, \beta) = \frac{1}{\beta^\alpha \Gamma(\alpha)} x^{\alpha-1} e^{-x/\beta}$$
+
+where:
+- α = shape parameter (what we're estimating)
+- β = scale parameter (fixed at 1 in this example)
+- Γ(α) = gamma function
+
+**Probability Model:**
+$$p(\mathbf{x} | \alpha) = \prod_{i=1}^{n} \frac{1}{\Gamma(\alpha)} x_i^{\alpha-1} e^{-x_i}$$
+
+(with β = 1 for simplicity)
+
+---
+
+# Part 2: Log-Likelihood Function
+
+```{r loglikelihood_function}
+# Define log-likelihood function
+LL <- function(a) {
+  (a - 1) * sum(log(x)) - sum(x) - n * lgamma(a)
+}
+
+cat("Log-Likelihood Function Explanation:\n")
+cat("=====================================\n\n")
+cat("LL(α) = (α-1)·Σ ln(x_i) - Σ x_i - n·ln(Γ(α))\n\n")
+cat("Terms:\n")
+cat("  (α-1)·Σ ln(x_i) : contribution from x^(α-1) term\n")
+cat("  -Σ x_i          : contribution from e^(-x_i) term\n")
+cat("  -n·ln(Γ(α))     : contribution from normalizing constant\n\n")
+
+# Evaluate log-likelihood at true parameter
+true_alpha <- 5
+true_LL <- LL(true_alpha)
+cat("Log-likelihood at true α = 5:\n")
+cat("LL(5) =", round(true_LL, 4), "\n\n")
+
+# Evaluate at initial guess
+initial_alpha <- 1
+initial_LL <- LL(initial_alpha)
+cat("Log-likelihood at initial α = 1:\n")
+cat("LL(1) =", round(initial_LL, 4), "\n\n")
+```
+
+---
+
+# Part 3: Newton-Raphson Algorithm
+
+## Complete Implementation
+
+```{r newton_raphson_implementation}
+# ========== NEWTON-RAPHSON ALGORITHM ==========
+
+# Initial values
+a <- 1.0              # Starting point
+tol <- 10^(-6)        # Convergence tolerance
+iter <- c(a)          # Store all iterates
+
+# Convergence tracking
+iteration_details <- data.frame(
+  Iteration = numeric(),
+  a = numeric(),
+  Score = numeric(),
+  Hessian = numeric(),
+  a_new = numeric(),
+  Change = numeric(),
+  LogLik = numeric()
+)
+
+iteration_count <- 0
+
+repeat {
+  iteration_count <- iteration_count + 1
+  
+  # STEP 1: Evaluate Score (First Derivative of LL)
+  score <- sum(log(x)) - n * digamma(a)
+  
+  # STEP 2: Evaluate Hessian (Second Derivative of LL)
+  hess <- -n * trigamma(a)
+  
+  # STEP 3: Newton-Raphson Update
+  a_new <- a - score / hess
+  
+  # STEP 4: Store iterates
+  iter <- c(iter, a_new)
+  change <- abs(a_new - a)
+  loglik <- LL(a_new)
+  
+  # Store detailed information
+  iteration_details <- rbind(iteration_details, data.frame(
+    Iteration = iteration_count,
+    a = round(a, 8),
+    Score = round(score, 8),
+    Hessian = round(hess, 8),
+    a_new = round(a_new, 8),
+    Change = round(change, 8),
+    LogLik = round(loglik, 4)
+  ))
+  
+  # STEP 5: Check Convergence
+  if (change < tol) break
+  
+  a <- a_new
+}
+
+# Final MLE
+MLE <- a_new
+
+cat("Newton-Raphson Convergence Summary:\n")
+cat("====================================\n")
+cat("Number of iterations:", iteration_count, "\n")
+cat("Starting point (a₀):", 1.0, "\n")
+cat("Final estimate (MLE):", round(MLE, 8), "\n")
+cat("True parameter (α*):", true_alpha, "\n")
+cat("Estimation error:", round(abs(MLE - true_alpha), 8), "\n")
+cat("Convergence tolerance:", tol, "\n")
+cat("Final change |a_new - a|:", round(change, 8), "\n")
+```
+
+---
+
+# Part 4: Algorithm Explanation
+
+## Step-by-Step Breakdown
+
+### Step 1: Score Function (First Derivative)
+
+```{r step1_score, eval=FALSE}
+score <- sum(log(x)) - n * digamma(a)
+```
+
+**Mathematical Definition:**
+$$S(\alpha) = \frac{\partial \ell(\alpha)}{\partial \alpha} = \sum_{i=1}^{n} \ln(x_i) - n \cdot \psi(\alpha)$$
+
+where ψ(α) = digamma(α) = d/dα [ln(Γ(α))]
+
+**Interpretation:**
+- Score measures the **slope** of the log-likelihood
+- Score = 0 at the maximum (where gradient is horizontal)
+- Positive score: likelihood increases to the right
+- Negative score: likelihood increases to the left
+
+**In R Code:**
+- `sum(log(x))`: Computes Σ ln(x_i)
+- `digamma(a)`: Digamma function ψ(α) = d/dα [ln(Γ(α))]
+- `n * digamma(a)`: Scales by sample size
+
+---
+
+### Step 2: Hessian (Second Derivative)
+
+```{r step2_hessian, eval=FALSE}
+hess <- -n * trigamma(a)
+```
+
+**Mathematical Definition:**
+$$H(\alpha) = \frac{\partial^2 \ell(\alpha)}{\partial \alpha^2} = -n \cdot \psi'(\alpha) = -n \cdot \text{trigamma}(\alpha)$$
+
+where ψ'(α) = trigamma(α) = d²/dα² [ln(Γ(α))]
+
+**Interpretation:**
+- Hessian measures the **curvature** of the log-likelihood
+- Negative Hessian: concave (likelihood is bell-shaped)
+- Large |Hessian|: steep curvature (well-defined peak)
+- Small |Hessian|: flat curvature (shallow peak)
+
+**Fisher Information Matrix:**
+$$\mathcal{I}(\alpha) = -H(\alpha) = n \cdot \text{trigamma}(\alpha)$$
+
+This is the expected information about α in the sample.
+
+**In R Code:**
+- `trigamma(a)`: Trigamma function ψ'(α)
+- `-n * trigamma(a)`: Negative because LL'' is negative (concavity)
+
+---
+
+### Step 3: Newton-Raphson Update
+
+```{r step3_update, eval=FALSE}
+a_new <- a - score / hess
+```
+
+**Newton-Raphson Formula:**
+$$\alpha_{n+1} = \alpha_n - \frac{S(\alpha_n)}{H(\alpha_n)}$$
+
+where:
+- S(α_n) = score at current iterate
+- H(α_n) = Hessian at current iterate
+
+**Intuition:**
+- Update = current value - (score / curvature)
+- Large |score|: bigger step needed
+- Large |curvature|: smaller step (peak is steep)
+- Automatically balances gradient and curvature information
+
+**Equivalently (using Fisher Information):**
+$$\alpha_{n+1} = \alpha_n + \frac{S(\alpha_n)}{\mathcal{I}(\alpha_n)}$$
+
+This is equivalent to maximum likelihood estimation via scoring algorithm.
+
+---
+
+### Step 4: Convergence Check
+
+```{r step4_convergence, eval=FALSE}
+if (abs(a_new - a) < tol) break
+```
+
+**Stopping Criterion:**
+- Continue iterations while |α_{n+1} - α_n| > tolerance
+- Stop when change becomes smaller than tol = 10^(-6)
+- Indicates convergence to a fixed point
+
+**Why this criterion?**
+- |α_{n+1} - α_n| → 0 as α_n → maximum
+- Near maximum: score ≈ 0, so α_{n+1} ≈ α_n
+- Tolerance balances accuracy vs. computational cost
+
+---
+
+# Part 5: Iteration History
+
+```{r iteration_history}
+cat("\nDetailed Iteration History:\n")
+cat("============================\n\n")
+print(iteration_details, row.names = FALSE)
+
+cat("\n\nConvergence Analysis:\n")
+cat("=======================\n")
+cat("Number of iterations to convergence:", nrow(iteration_details), "\n")
+cat("Final change:", iteration_details$Change[nrow(iteration_details)], "\n")
+cat("Tolerance threshold:", tol, "\n")
+cat("Converged successfully:", 
+    iteration_details$Change[nrow(iteration_details)] < tol, "\n")
+```
+
+---
+
+# Part 6: Results and Visualization
+
+## Numerical Results
+
+```{r numerical_results}
+cat("\n========== FINAL RESULTS ==========\n\n")
+
+cat("MLE of shape parameter α:\n")
+cat("α̂ =", round(MLE, 6), "\n")
+cat("True value: α* = 5.000000\n")
+cat("Estimation error: |α̂ - α*| =", round(abs(MLE - 5), 6), "\n\n")
+
+cat("Log-likelihood at MLE:\n")
+cat("ℓ(α̂) =", round(LL(MLE), 4), "\n")
+cat("ℓ(α*) =", round(LL(5), 4), "\n\n")
+
+cat("Expected information (Fisher):\n")
+cat("I(α̂) = n·ψ'(α̂) =", round(n * trigamma(MLE), 4), "\n\n")
+
+cat("Asymptotic standard error:\n")
+cat("SE(α̂) ≈ √(1/I(α̂)) =", round(1/sqrt(n * trigamma(MLE)), 6), "\n")
+```
+
+## Likelihood Curve with Iteration Path
+
+```{r plot_likelihood, fig.width=12, fig.height=7}
+# Create sequence for likelihood curve
+A <- seq(0.1, 10, 0.01)
+L <- sapply(A, LL)
+
+# Main plot
+plot(A, L,
+     type = "l", lwd = 2.5, col = "black",
+     xlab = expression(alpha),
+     ylab = "Log-Likelihood",
+     main = "Newton-Raphson Method: Finding MLE of Gamma Shape Parameter",
+     ylim = c(min(L), max(L) + 500),
+     cex.lab = 1.2,
+     cex.main = 1.3)
+
+# Add grid
+grid(col = "gray", lty = 3, lwd = 1)
+
+# Mark true parameter
+abline(v = 5, col = "red", lty = 2, lwd = 2.5)
+text(5, max(L) + 200, "True α = 5", col = "red", cex = 1.1, font = 2)
+
+# Mark MLE
+abline(v = MLE, col = "blue", lty = 2, lwd = 2.5)
+text(MLE, max(L) + 350, paste("MLE α̂ =", round(MLE, 4)), 
+     col = "blue", cex = 1.1, font = 2)
+
+# Plot iteration path
+iter_likelihoods <- sapply(iter, LL)
+points(iter, iter_likelihoods, pch = 19, cex = 1.2, col = "darkgreen")
+
+# Connect iteration points with arrows
+for (i in 1:(length(iter)-1)) {
+  if (i <= length(iter) - 1) {
+    arrows(iter[i], iter_likelihoods[i], 
+           iter[i+1], iter_likelihoods[i+1],
+           col = "darkgreen", lwd = 1.5, 
+           length = 0.15, angle = 20)
+  }
+}
+
+# Highlight starting and ending points
+points(iter[1], iter_likelihoods[1], pch = 16, cex = 2, col = "orange")
+points(iter[length(iter)], iter_likelihoods[length(iter)], 
+       pch = 17, cex = 2.5, col = "purple")
+
+# Legend
+legend("bottomright",
+       legend = c("Log-Likelihood", "True parameter", "MLE", 
+                  "Initial point", "NR iterations", "Final point"),
+       col = c("black", "red", "blue", "orange", "darkgreen", "purple"),
+       lty = c(1, 2, 2, NA, 1, NA),
+       lwd = c(2.5, 2.5, 2.5, NA, 1.5, NA),
+       pch = c(NA, NA, NA, 16, 19, 17),
+       cex = 1)
+```
+
+---
+
+# Part 7: Convergence Analysis
+
+## Convergence Rate
+
+```{r convergence_rate}
+# Calculate convergence metrics
+errors <- abs(iter - 5)  # Distance from true parameter
+log_errors <- log10(errors[errors > 0])  # Log scale
+iterations_seq <- 1:length(errors)
+
+cat("Convergence Rate Analysis:\n")
+cat("===========================\n\n")
+
+cat("Error progression (distance from true α = 5):\n")
+for (i in 1:length(iter)) {
+  cat("Iteration", i-1, ": α =", round(iter[i], 8), 
+      ", Error =", round(errors[i], 2e-7), "\n")
+}
+
+cat("\n\nQuadratic Convergence Check:\n")
+cat("If convergence is quadratic: error_{n+1} ≈ C × (error_n)²\n\n")
+
+# Check quadratic convergence for last few iterations
+if (length(errors) >= 4) {
+  for (i in 3:(length(errors)-1)) {
+    error_ratio <- errors[i+1] / (errors[i]^2)
+    cat("Iteration", i-1, "→", i, ": e_{n+1} / e_n² =", 
+        round(error_ratio, 6), "\n")
+  }
+}
+```
+
+## Convergence Plot
+
+```{r plot_convergence, fig.width=12, fig.height=6}
+par(mfrow = c(1, 2))
+
+# Plot 1: Error on log scale
+plot(0:(length(errors)-1), log10(pmax(errors, 1e-16)),
+     type = "b", pch = 19, cex = 1.2, col = "darkblue", lwd = 2,
+     main = "Convergence: Absolute Error vs. Iteration (Log Scale)",
+     xlab = "Iteration Number (n)",
+     ylab = "log₁₀(|αₙ - α*|)",
+     cex.lab = 1.1)
+grid(col = "gray", lty = 3)
+
+# Plot 2: Parameter value convergence
+plot(0:(length(iter)-1), iter,
+     type = "b", pch = 19, cex = 1.2, col = "darkred", lwd = 2,
+     main = "Convergence: Parameter Estimate vs. Iteration",
+     xlab = "Iteration Number (n)",
+     ylab = expression(alpha[n]),
+     ylim = c(0, 6),
+     cex.lab = 1.1)
+abline(h = 5, col = "green", lty = 2, lwd = 2)
+text(nrow(iteration_details)/2, 5.3, "True α = 5", col = "green", 
+     cex = 1.1, font = 2)
+grid(col = "gray", lty = 3)
+
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Part 8: Comparison: Newton-Raphson vs. Other Methods
+
+```{r comparison}
+cat("\nComparison of Root-Finding/Optimization Methods:\n")
+cat("==================================================\n\n")
+
+comparison_table <- data.frame(
+  Method = c("Bisection", "Newton-Raphson", "Gradient Descent", "Secant"),
+  Speed = c("Slow (Linear)", "Very Fast (Quadratic)", "Slow (Linear)", "Medium (Superlinear)"),
+  Convergence = c("Guaranteed", "Local", "Depends", "Local"),
+  Derivatives = c("None", "Score & Hessian", "Score", "None"),
+  Per_Iteration_Cost = c("Low", "High", "Low", "Medium"),
+  Iterations_NR_vs_This = c("~50", "1 (baseline)", "~100", "~3")
+)
+
+print(comparison_table)
+
+cat("\n\nFor this problem:\n")
+cat("• Bisection: Would require ~50+ iterations\n")
+cat("• Newton-Raphson: Required", nrow(iteration_details), "iterations\n")
+cat("• Speed improvement: ~", round(50/nrow(iteration_details), 1), "× faster than bisection\n")
+```
+
+---
+
+# Part 9: Summary: Key Concepts
+
+## Newton-Raphson Algorithm
+
+**General Formula:**
+$$x_{n+1} = x_n - \frac{f'(x_n)}{f''(x_n)}$$
+
+**For MLE (score equation):**
+$$\hat{\theta} = \theta_n - \frac{S(\theta_n)}{H(\theta_n)} = \theta_n + \frac{S(\theta_n)}{\mathcal{I}(\theta_n)}$$
+
+where:
+- S(θ) = score = ∂ℓ(θ)/∂θ (first derivative)
+- H(θ) = Hessian = ∂²ℓ(θ)/∂θ² (second derivative)
+- I(θ) = Fisher information = -E[H(θ)]
+
+## Advantages
+
+✓ **Quadratic convergence** — extremely fast near solution
+✓ **Uses curvature information** — adapts step size automatically
+✓ **Few iterations needed** — typically 3-6 iterations for convergence
+✓ **Elegant for MLEs** — naturally combines with score/information
+✓ **Standard in statistics** — used in most statistical software
+
+## Disadvantages
+
+✗ **Local convergence** — may fail with poor starting point
+✗ **Requires Hessian** — not always available or easy to compute
+✗ **Can diverge** — if Hessian is poorly conditioned
+✗ **Computationally expensive** — per iteration cost is high
+✗ **No sign change guarantee** — cannot use bracketing approach
+
+## When to Use Newton-Raphson
+
+- **MLE problems** where score and Hessian are available
+- **Good initial estimates** available (from method of moments, etc.)
+- **Need fast convergence** for large datasets
+- **Smooth, well-behaved likelihood** (unimodal)
+- **Dimension is moderate** (not too many parameters)
+
+## Gamma Distribution Special Features
+
+For Gamma(α, β=1):
+
+**Relationship to data:**
+- Method of moments: α̂ = x̄²/s² (rough initial estimate)
+- In our case: x̄ ≈ 4.95, s² ≈ 4.85, so α̂_MM ≈ 5.05
+
+**MLE properties:**
+- No closed form — requires numerical optimization
+- Log-likelihood is strictly concave in α
+- Unique global maximum exists
+- Newton-Raphson converges quadratically
+
+---
+
+# Conclusion
+
+The **Newton-Raphson method** is a powerful numerical algorithm for finding the MLE of the Gamma shape parameter. In this example:
+
+**Key Results:**
+- True parameter: α* = 5.000000
+- MLE estimate: α̂ = `r round(MLE, 6)`
+- Estimation error: `r round(abs(MLE - 5), 8)`
+- Iterations to convergence: `r nrow(iteration_details)`
+- **Quadratic convergence** demonstrated in iteration history
+
+**Why Newton-Raphson Succeeded:**
+1. Gamma likelihood is strictly concave → unique maximum
+2. Starting point α₀ = 1 was not too far from true value
+3. Score and Hessian easily computed via digamma/trigamma functions
+4. Algorithm exploited both gradient and curvature information
+
+The algorithm exemplifies the principle that **using derivative information** leads to dramatically faster convergence than derivative-free methods like bisection.
+
+---
+
+# References
+
+- Casella, G., & Berger, R. L. (2002). Statistical Inference (2nd ed.). Duxbury Press.
+
+- Pawitan, Y. (2001). In All Likelihood: Statistical Modelling and Inference Using Likelihood. Oxford University Press.
+
+- Lange, K. (2010). Numerical Analysis for Statisticians (2nd ed.). Springer.
+
+- Boyd, S., & Vandenberghe, L. (2004). Convex Optimization. Cambridge University Press.
+
+---
+
+# Appendix: R Functions Used
+
+**digamma(x)** — Digamma function ψ(x)
+- First derivative of log-gamma function
+- Used for score computation
+- Related to derivative of mean
+
+**trigamma(x)** — Trigamma function ψ'(x)
+- Second derivative of log-gamma function
+- Used for Hessian computation
+- Related to derivative of variance
+
+**lgamma(x)** — Log-gamma function
+- Returns log(Γ(x))
+- Used in likelihood computation
+
+These special functions are essential for working with Gamma, Beta, Dirichlet, and other special distributions in R.
+
